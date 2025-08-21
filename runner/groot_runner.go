@@ -7,6 +7,7 @@ import (
 	"log"
 	"strings"
 
+	"github.com/gorilla/websocket"
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/internal/agent/parentmap"
 	"google.golang.org/adk/internal/agent/runconfig"
@@ -22,18 +23,22 @@ type GRootRunner struct {
 	RootAgent      agent.Agent
 	SessionService sessionservice.Service
 
-	grootEndpoint string
-	parents       parentmap.Map
+	parents parentmap.Map
+
+	grootConn *websocket.Conn
 }
 
-func NewGRootRunner(grootEndpoint string, appName string, rootAgent agent.Agent) *GRootRunner {
-	// TODO: open a connection to the GRoot endpoint.
-
+func NewGRootRunner(endpoint string, appName string, rootAgent agent.Agent) (*GRootRunner, error) {
+	c, _, err := websocket.DefaultDialer.Dial(endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
 	return &GRootRunner{
 		AppName:        appName,
 		RootAgent:      rootAgent,
 		SessionService: sessionservice.Mem(),
-	}
+		grootConn:      c,
+	}, nil
 }
 
 func (r *GRootRunner) Run(ctx context.Context, userID, sessionID string, msg *genai.Content, cfg *RunConfig) iter.Seq2[*session.Event, error] {
