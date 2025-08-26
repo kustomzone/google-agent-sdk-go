@@ -1,9 +1,10 @@
 package internal
 
 import (
+	"sync"
+
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"google.golang.org/genai"
 )
 
 type Client struct {
@@ -45,36 +46,6 @@ type executeActionsMsg struct {
 	StreamFrames []*StreamFrame `json:"streamFrames,omitempty"`
 }
 
-type Shadow struct {
-	sess         *Session
-	displayName  string
-	input        string
-	output       string
-	waitStreamID string
-}
-
-func (s *Shadow) WriteFrame(id string, c *Chunk, continued bool) error {
-	return s.sess.writeStreamFrame(&StreamFrame{
-		StreamID:  id,
-		Data:      c,
-		Continued: continued,
-	})
-}
-
-func (s *Shadow) Wait() error {
-	var resp executeActionsMsg
-	for {
-		if err := s.sess.c.conn.ReadJSON(&resp); err != nil {
-			return err
-		}
-		for _, frame := range resp.StreamFrames {
-			if frame.StreamID == s.waitStreamID && !frame.Continued {
-				return nil
-			}
-		}
-	}
-}
-
 func NewClient(endpoint string, apiKey string) (*Client, error) {
 	c, _, err := websocket.DefaultDialer.Dial(endpoint+"?key="+apiKey, nil)
 	if err != nil {
@@ -84,33 +55,76 @@ func NewClient(endpoint string, apiKey string) (*Client, error) {
 }
 
 type Session struct {
+	mu        sync.Mutex
 	c         *Client
 	sessionID string
+
+	pendingWrites map[string]string // stream_id, output_id
 }
 
 func (c *Client) OpenSession(sessionID string) (*Session, error) {
-	return &Session{c: c, sessionID: sessionID}, nil
+	return &Session{
+		c:             c,
+		sessionID:     sessionID,
+		pendingWrites: make(map[string]string),
+	}, nil
 }
 
 func (s *Session) ID() string {
 	return s.sessionID
 }
 
-func (s *Session) NewADKShadow(name string, input string, output string) (*Shadow, error) {
-	waitID, err := s.writeShadowAction(name, input, output)
-	if err != nil {
-		return nil, err
+func (s *Session) WriteFrame(id string, c *Chunk, continued bool) error {
+	// Don't allow any other activity on the bidi connection
+	// until the chunk write is on the wire.
+	// TODO: Probably it's better to accept an iterator as input
+	// and block WriteFrame until every chunk is written for the stream.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, ok := s.pendingWrites[id]
+
+	if !ok {
+		output := uuid.NewString()
+		if err := s.c.conn.WriteJSON(&executeActionsMsg{
+			SessionID: s.sessionID,
+			ActionGraph: &ActionGraph{
+				Actions: []*Action{
+					{
+						Name:   "save_stream",
+						Inputs: []*Port{{Name: "input", StreamID: id}},
+					},
+				},
+				Outputs: []*Port{
+					{
+						Name:     "output",
+						StreamID: output,
+					},
+				},
+			},
+		}); err != nil {
+			return err
+		}
+		s.pendingWrites[id] = output
 	}
-	return &Shadow{
-		sess:         s,
-		displayName:  name,
-		input:        input,
-		output:       output,
-		waitStreamID: waitID,
-	}, nil
+
+	// TODO: Remove the dangling reference in waiting if continued is not true.
+	// TODO: Pull the output?
+	return s.c.conn.WriteJSON(&executeActionsMsg{
+		StreamFrames: []*StreamFrame{{
+			StreamID:  id,
+			Data:      c,
+			Continued: continued,
+		}},
+	})
 }
 
 func (s *Session) ReadAll(id string) ([]*Chunk, error) {
+	// Don't allow any other activity on the bidi connection
+	// until the read is completed.
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	var chunks []*Chunk
 	if err := s.c.conn.WriteJSON(&executeActionsMsg{
 		SessionID: s.sessionID,
@@ -138,46 +152,4 @@ func (s *Session) ReadAll(id string) ([]*Chunk, error) {
 			}
 		}
 	}
-}
-
-func (s *Session) writeStreamFrame(sf *StreamFrame) error {
-	return s.c.conn.WriteJSON(&executeActionsMsg{
-		StreamFrames: []*StreamFrame{sf},
-	})
-}
-
-func (s *Session) writeShadowAction(name string, input, output string) (waitID string, err error) {
-	waitID = uuid.NewString()
-	if err := s.c.conn.WriteJSON(&executeActionsMsg{
-		SessionID: s.sessionID,
-		ActionGraph: &ActionGraph{
-			Actions: []*Action{
-				{
-					Name:    "save_stream",
-					Inputs:  []*Port{{Name: "input", StreamID: output}},
-					Outputs: []*Port{{Name: "output", StreamID: waitID}},
-				},
-			},
-			Outputs: []*Port{{Name: "output", StreamID: waitID}},
-		},
-	}); err != nil {
-		return "", err
-	}
-	return waitID, err
-}
-
-func ChunkFromPart(p *genai.Part) *Chunk {
-	var chunk Chunk
-	switch {
-	case p.Text != "":
-		chunk.MIMEType = "text/plain"
-		chunk.Data = []byte(p.Text)
-	case p.InlineData != nil:
-		chunk.MIMEType = p.InlineData.MIMEType
-		chunk.Data = p.InlineData.Data
-	default:
-		// TODO(jbd): Support all types.
-		panic("part not supported yet")
-	}
-	return &chunk
 }

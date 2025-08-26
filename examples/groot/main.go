@@ -5,27 +5,31 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"iter"
 	"log"
 	"os"
 
 	"google.golang.org/adk/agent/llmagent"
 	"google.golang.org/adk/llm/gemini"
 	"google.golang.org/adk/runner"
+	"google.golang.org/adk/session"
 	"google.golang.org/adk/tool"
 	"google.golang.org/genai"
 )
 
 var (
-	logfile       string
-	resume        bool
-	grootEndpoint string
+	logfile   string
+	resume    bool
+	groot     string
+	sessionID string
 )
 
 func main() {
 	ctx := context.Background()
-	flag.StringVar(&logfile, "logfile", "", "")
+	flag.StringVar(&logfile, "logfile", "adk_runner.log", "")
 	flag.BoolVar(&resume, "resume", false, "")
-	flag.StringVar(&grootEndpoint, "endpoint", "wss://dev-grootafe-pa-googleapis.sandbox.google.com/ws/cloud.ai.groot.afe.GRootAfeService/ExecuteActions", "")
+	flag.StringVar(&groot, "groot", "wss://dev-grootafe-pa-googleapis.sandbox.google.com/ws/cloud.ai.groot.afe.GRootAfeService/ExecuteActions", "")
+	flag.StringVar(&sessionID, "sid", "", "")
 	flag.Parse()
 
 	model, err := gemini.NewModel(ctx, "gemini-2.5-flash", &genai.ClientConfig{
@@ -35,16 +39,6 @@ func main() {
 		log.Fatalf("Failed to create model: %v", err)
 	}
 
-	// emojiAgent, err := llmagent.New(llmagent.Config{
-	// 	Name:        "emoji_agent",
-	// 	Model:       model,
-	// 	Description: "An agent that can add more emojis to responses.",
-	// 	Instruction: "Answer every answer with a ton of emojis, make it excessive.",
-	// })
-	// if err != nil {
-	// 	log.Fatalf("Failed to create agent: %v", err)
-	// }
-
 	agent, err := llmagent.New(llmagent.Config{
 		Name:        "weather_time_agent",
 		Model:       model,
@@ -53,21 +47,30 @@ func main() {
 		Tools: []tool.Tool{
 			tool.NewGoogleSearchTool(model),
 		},
-		// SubAgents: []agent.Agent{emojiAgent},
 	})
 	if err != nil {
 		log.Fatalf("Failed to create agent: %v", err)
 	}
 
-	r, err := runner.NewGRootRunner(&runner.GRootRunnerConfig{
-		GRootEndpoint: grootEndpoint,
-		GRootAPIKey:   os.Getenv("GROOT_KEY"),
-		EventLog:      logfile,
-		AppName:       "hello_world",
-		RootAgent:     agent,
-	}, nil)
-	if err != nil {
-		log.Fatal(err)
+	var r Runner
+	rconf := &runner.GRootRunnerConfig{
+		GRootEndpoint:  groot,
+		GRootAPIKey:    os.Getenv("GROOT_KEY"),
+		GRootSessionID: sessionID,
+		EventLog:       logfile,
+		AppName:        "hello_world",
+		RootAgent:      agent,
+	}
+	if !resume {
+		r, err = runner.NewGRootRunner(rconf)
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		r, err = runner.NewResumerGRootRunner(rconf)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	reader := bufio.NewReader(os.Stdin)
@@ -80,8 +83,8 @@ func main() {
 		}
 
 		userMsg := genai.NewContentFromText(userInput, genai.RoleUser)
-		fmt.Print("\nAgent -> ")
-		for event, err := range r.Run(ctx, "test_user", "test_session", userMsg, &runner.RunConfig{
+		fmt.Print("\n")
+		for event, err := range r.Run(ctx, "test_user", sessionID, userMsg, &runner.RunConfig{
 			StreamingMode: runner.StreamingModeSSE,
 		}) {
 			if err != nil {
@@ -93,4 +96,8 @@ func main() {
 			}
 		}
 	}
+}
+
+type Runner interface {
+	Run(ctx context.Context, userID, sessionID string, msg *genai.Content, cfg *runner.RunConfig) iter.Seq2[*session.Event, error]
 }

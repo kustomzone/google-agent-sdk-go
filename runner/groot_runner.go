@@ -24,9 +24,12 @@ import (
 	"google.golang.org/genai"
 )
 
+const defaultEventLog = "adk_runner.log"
+
 type GRootRunnerConfig struct {
-	GRootEndpoint string
-	GRootAPIKey   string
+	GRootEndpoint  string
+	GRootAPIKey    string
+	GRootSessionID string
 
 	EventLog string
 
@@ -43,7 +46,11 @@ type GRootRunner struct {
 	eventLog *EventLog
 }
 
-func NewGRootRunner(cfg *GRootRunnerConfig, elog *EventLog) (*GRootRunner, error) {
+func NewGRootRunner(cfg *GRootRunnerConfig) (*GRootRunner, error) {
+	return newGRootRunner(cfg, nil)
+}
+
+func newGRootRunner(cfg *GRootRunnerConfig, elog *EventLog) (*GRootRunner, error) {
 	if cfg.SessionService == nil {
 		cfg.SessionService = sessionservice.Mem()
 	}
@@ -56,9 +63,9 @@ func NewGRootRunner(cfg *GRootRunnerConfig, elog *EventLog) (*GRootRunner, error
 			// TODO: Event log should be per app, and per user.
 			// For this demo, we will use a single log file
 			// assuming there is a single app and a single user.
-			cfg.EventLog = "adk_runner.log"
+			cfg.EventLog = defaultEventLog
 		}
-		elog, err = CreateEventLog(cfg.AppName, cfg.EventLog, client)
+		elog, err = openEventLog(cfg.AppName, cfg.EventLog, client, cfg.GRootSessionID, true)
 		if err != nil {
 			return nil, err
 		}
@@ -117,31 +124,34 @@ func (r *GRootRunner) Run(ctx context.Context, userID, sessionID string, msg *ge
 		}
 
 		if err := r.eventLog.LogActivity(
-			userID,
-			"agent_start",
-			r.registry.AgentFullname(agentToRun),
-			input,
-			output,
-		); err != nil {
-			log.Printf("Failed to log agent: %v", err)
+			userID, "agent_start", r.registry.AgentFullname(agentToRun), input, output); err != nil {
+			if !yield(nil, err) {
+				return
+			}
 		}
 		for event, err := range agentToRun.Run(ctx) {
 			if err != nil {
 				if !yield(event, err) {
 					return
 				}
-				continue
+				return
 			}
-
 			if err := r.cfg.SessionService.AppendEvent(ctx, session, event); err != nil {
 				yield(nil, fmt.Errorf("failed to add event to session: %w", err))
 				return
 			}
-
 			if err := r.eventLog.LogEvent(userID, output, event); err != nil {
-				log.Printf("Failed to log event: %v", err)
+				if !yield(nil, err) {
+					return
+				}
 			}
 			if !yield(event, nil) {
+				return
+			}
+		}
+		if err := r.eventLog.LogActivity(
+			userID, "agent_end", r.registry.AgentFullname(agentToRun), input, output); err != nil {
+			if !yield(nil, err) {
 				return
 			}
 		}
@@ -199,7 +209,6 @@ func (r *GRootRunner) setupCFC(curAgent agent.Agent) error {
 	}
 
 	model := llminternal.Reveal(llmAgent).Model
-
 	if model == nil {
 		return fmt.Errorf("LLMAgent has no model")
 	}
@@ -233,15 +242,20 @@ type EventLog struct {
 	appName string
 	logFile *os.File
 	session *internal.Session
-	shadows map[string]*internal.Shadow // by output ID
 }
 
-func CreateEventLog(appName string, filename string, client *internal.Client) (*EventLog, error) {
-	sess, err := client.OpenSession(uuid.NewString())
+func openEventLog(appName string, filename string, client *internal.Client, sid string, create bool) (*EventLog, error) {
+	sess, err := client.OpenSession(sid)
 	if err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
+
+	perm := os.O_RDWR | os.O_APPEND
+	if create {
+		perm = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	}
+
+	file, err := os.OpenFile(filename, perm, 0644)
 	if err != nil {
 		return nil, err
 	}
@@ -249,79 +263,51 @@ func CreateEventLog(appName string, filename string, client *internal.Client) (*
 		appName: appName,
 		logFile: file,
 		session: sess,
-		shadows: make(map[string]*internal.Shadow),
-	}, nil
-}
-
-func OpenEventLog(appName string, filename string, client *internal.Client) (*EventLog, error) {
-	sess, err := client.OpenSession(uuid.NewString())
-	if err != nil {
-		return nil, err
-	}
-	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		return nil, err
-	}
-	return &EventLog{
-		appName: appName,
-		logFile: file,
-		session: sess,
-		shadows: make(map[string]*internal.Shadow),
 	}, nil
 }
 
 type ActivityEvent struct {
-	SessionID string `json:"session_id,omitempty"`
-	Kind      string `json:"kind,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Input     string `json:"input,omitempty"`
-	Output    string `json:"output,omitempty"`
+	Kind   string `json:"kind,omitempty"`
+	Name   string `json:"name,omitempty"`
+	Input  string `json:"input,omitempty"`
+	Output string `json:"output,omitempty"`
 }
 
 type StreamEvent struct {
-	SessionID string `json:"session_id,omitempty"`
-	Kind      string `json:"kind,omitempty"`
-	StreamID  string `json:"stream_id,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	StreamID string `json:"stream_id,omitempty"`
 }
 
 func (e *EventLog) LogEvent(userID string, id string, event *session.Event) error {
 	if event.LLMResponse == nil || event.LLMResponse.Content == nil {
 		return nil
 	}
-	shadow, ok := e.shadows[id]
-	if !ok {
-		return fmt.Errorf("no shadow found for output ID: %s", id)
-	}
-
 	out, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
-	if err := shadow.WriteFrame(id, &internal.Chunk{
+	if err := e.session.WriteFrame(id, &internal.Chunk{
 		MIMEType: "application/json",
 		Data:     out,
 	}, event.Partial); err != nil {
 		return err
 	}
+	if event.Partial {
+		// Only log the event when all writes are finished.
+		return nil
+	}
 	return e.logJSON(&StreamEvent{
-		SessionID: e.session.ID(),
-		Kind:      "stream",
-		StreamID:  id,
+		Kind:     "stream",
+		StreamID: id,
 	})
 }
 
 func (e *EventLog) LogActivity(userID string, kind string, name, input, output string) error {
-	shadow, err := e.session.NewADKShadow(name, input, output)
-	if err != nil {
-		return err
-	}
-	e.shadows[output] = shadow
 	return e.logJSON(&ActivityEvent{
-		SessionID: e.session.ID(),
-		Kind:      kind,
-		Name:      name,
-		Input:     input,
-		Output:    output,
+		Kind:   kind,
+		Name:   name,
+		Input:  input,
+		Output: output,
 	})
 }
 
@@ -337,64 +323,27 @@ func (e *EventLog) logJSON(v any) error {
 	return e.logFile.Sync()
 }
 
-func ResumerEventLog(filename string, client *internal.Client) (*EventLog, []*session.Event, error) {
+func ResumerEventLog(appName, filename string, client *internal.Client, sessionID string) (*EventLog, error) {
 	file, err := os.OpenFile(filename, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0644)
 	if err != nil {
-		return nil, nil, err
-	}
-	scanner := bufio.NewScanner(file)
-	var sessionID string
-	var eventIDs []string
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Split(line, "|")
-		switch parts[1] {
-		case "agent_start":
-		case "stream":
-			sessionID = parts[0]
-			eventIDs = append(eventIDs, parts[2])
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	sess, err := client.OpenSession(sessionID)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	// Hydrate all events...
-	var events []*session.Event
-	for _, id := range eventIDs {
-		chunks, err := sess.ReadAll(id)
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, chunk := range chunks {
-			if chunk == nil || chunk.Data == nil {
-				continue
-			}
-			if chunk.MIMEType != "application/json" {
-				return nil, nil, fmt.Errorf("expected application/json, got %s", chunk.MIMEType)
-			}
-			var event session.Event
-			if err := json.Unmarshal(chunk.Data, &event); err != nil {
-				return nil, nil, err
-			}
-			events = append(events, &event)
-		}
+		return nil, err
 	}
 	return &EventLog{
-		logFile: file,
+		appName: appName,
 		session: sess,
-		shadows: make(map[string]*internal.Shadow),
-	}, events, nil
+		logFile: file,
+	}, nil
 }
 
 type ResumerGRootRunner struct {
 	cfg      *GRootRunnerConfig
-	elog     *EventLog
-	delegate *GRootRunner // init
+	eventLog *EventLog
+	delegate *GRootRunner
+	registry *internal.Registry
 
 	replayOnce sync.Once
 }
@@ -410,45 +359,119 @@ func NewResumerGRootRunner(cfg *GRootRunnerConfig) (*ResumerGRootRunner, error) 
 	if err != nil {
 		return nil, err
 	}
-	elog, err := OpenEventLog(cfg.AppName, cfg.EventLog, client)
+	elog, err := openEventLog(cfg.AppName, cfg.EventLog, client, cfg.GRootSessionID, false)
 	if err != nil {
 		return nil, err
 	}
-
-	delegate := &GRootRunner{
-		cfg:      cfg,
-		eventLog: elog,
-		registry: internal.NewRegistry(cfg.RootAgent),
+	delegate, err := newGRootRunner(cfg, elog)
+	if err != nil {
+		return nil, err
 	}
 	return &ResumerGRootRunner{
 		cfg:      cfg,
-		elog:     elog,
-		delegate: delegate,
+		eventLog: elog,
+		delegate: delegate, // once resumption is done, delegate continues
+		registry: internal.NewRegistry(cfg.RootAgent),
 	}, nil
 }
 
-func (r *ResumerGRootRunner) replay(ctx context.Context, userID, sessionID string) (context.Context, error) {
+func (r *ResumerGRootRunner) replay(ctx context.Context, session sessionservice.StoredSession, userID, sessionID string) error {
+	// TODO: Replay needs to be played for the given user ID.
+	waiting := make(map[string]*ActivityEvent)
+	scanner := bufio.NewScanner(r.eventLog.logFile)
+	for scanner.Scan() {
+		stream, act, err := r.parse(scanner.Bytes())
+		if err != nil {
+			return err
+		}
+		if stream != nil {
+			if err := r.replayStream(ctx, session, stream); err != nil {
+				return err
+			}
+		}
+		if act != nil {
+			// Figure out what to do with the activity.
+			key := act.Name + ":" + act.Input + ":" + act.Output
+			if act.Kind == "agent_start" {
+				waiting[key] = act
+			}
+			if act.Kind == "agent_end" {
+				delete(waiting, key)
+			}
+		}
+	}
+	// TODO(jbd): Does order matter?
+	// Allow concurrency in the future.
+	for _, act := range waiting {
+		if err := r.replayAgent(ctx, act.Name, act.Input, act.Output); err != nil {
+			return err
+		}
+	}
+	return scanner.Err()
+}
+
+func (r *ResumerGRootRunner) replayAgent(ctx context.Context, agent, input, output string) error {
 	panic("not implemented")
+	// TODO: Log agent_end.
+}
+
+func (r *ResumerGRootRunner) replayStream(ctx context.Context, sess sessionservice.StoredSession, stream *StreamEvent) error {
+	chunks, err := r.eventLog.session.ReadAll(stream.StreamID)
+	if err != nil {
+		return err
+	}
+	for _, chunk := range chunks {
+		var event session.Event
+		if chunk == nil || chunk.Data == nil {
+			continue
+		}
+		if err := json.Unmarshal(chunk.Data, &event); err != nil {
+			return err
+		}
+		if err := r.cfg.SessionService.AppendEvent(ctx, sess, &event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *ResumerGRootRunner) parse(b []byte) (*StreamEvent, *ActivityEvent, error) {
+	var event StreamEvent
+	var activity ActivityEvent
+	if err := json.Unmarshal(b, &event); err != nil {
+		return nil, nil, err
+	}
+	if event.Kind == "stream" {
+		return &event, nil, nil
+	}
+	if err := json.Unmarshal(b, &activity); err != nil {
+		return nil, nil, err
+	}
+	return nil, &activity, nil
 }
 
 func (r *ResumerGRootRunner) Run(ctx context.Context, userID, sessionID string, msg *genai.Content, cfg *RunConfig) iter.Seq2[*session.Event, error] {
 	return func(yield func(*session.Event, error) bool) {
+		session, err := r.cfg.SessionService.Get(ctx, &sessionservice.GetRequest{
+			ID: session.ID{
+				AppName:   r.cfg.AppName,
+				UserID:    userID,
+				SessionID: sessionID,
+			},
+		})
+		if err != nil {
+			yield(nil, err)
+			return
+		}
 		// TODO(jbd): Replayer event log will be per application and user.
 		// Resumer should support multitenancy. We skip this effort in the prototype.
-		replayCtx := ctx
 		r.replayOnce.Do(func() {
-			var err error
-			replayCtx, err = r.replay(ctx, userID, sessionID)
-			if err != nil {
+			if err := r.replay(ctx, session, userID, sessionID); err != nil {
 				yield(nil, err)
 				return
 			}
 		})
-		for event, err := range r.delegate.Run(replayCtx, userID, sessionID, msg, cfg) {
-			if err != nil {
-				yield(event, err)
-				return
-			}
+		for event, err := range r.delegate.Run(ctx, userID, sessionID, msg, cfg) {
 			if !yield(event, err) {
 				return
 			}
