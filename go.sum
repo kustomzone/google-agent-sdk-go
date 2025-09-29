@@ -8,6 +8,8 @@ cloud.google.com/go/compute/metadata v0.7.0/go.mod h1:j5MvL9PprKL39t166CoB1uVHfQ
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/a2aproject/a2a-go v0.0.0-20250922145337-2fa71f4d7988 h1:JRqblgIfBbRonkCDBo98+q0DITyHt7XUBvUUGKV9STw=
 github.com/a2aproject/a2a-go v0.0.0-20250922145337-2fa71f4d7988/go.mod h1:8C0O6lsfR7zWFEqVZz/+zWCoxe8gSWpknEpqm/Vgj3E=
+github.com/a2aproject/a2a-go v0.0.0-20250929112340-7205dc695671 h1:KxlbVQpwyWjkyX+G97PnxT8ZkVXPp7hR51aimQW/4zE=
+github.com/a2aproject/a2a-go v0.0.0-20250929112340-7205dc695671/go.mod h1:8C0O6lsfR7zWFEqVZz/+zWCoxe8gSWpknEpqm/Vgj3E=
 github.com/awalterschulze/gographviz v2.0.3+incompatible h1:9sVEXJBJLwGX7EQVhLm2elIKCm7P2YHFC8v6096G09E=
 github.com/awalterschulze/gographviz v2.0.3+incompatible/go.mod h1:GEV5wmg4YquNw7v1kkyoX9etIk8yVmXj+AkDHuuETHs=
 github.com/census-instrumentation/opencensus-proto v0.2.1/go.mod h1:f6KPmirojxKA12rnyqOA5BBL4O983OfeGPqjHWSTneU=
