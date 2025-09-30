@@ -103,7 +103,7 @@ func (e *Executor) Execute(ctx context.Context, reqCtx a2asrv.RequestContext, qu
 		return err
 	}
 
-	processor := &eventProcessor{task: task, reqCtx: reqCtx, meta: invocationMeta}
+	processor := newEventProcessor(task, reqCtx, invocationMeta)
 	if err := e.process(ctx, r, processor, content, queue); err != nil {
 		return err
 	}

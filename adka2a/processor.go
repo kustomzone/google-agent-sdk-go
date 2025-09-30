@@ -27,6 +27,13 @@ type eventProcessor struct {
 	terminalEvents map[a2a.TaskState]*a2a.TaskStatusUpdateEvent
 }
 
+func newEventProcessor(task *a2a.Task, reqCtx a2asrv.RequestContext, meta invocationMeta) *eventProcessor {
+	return &eventProcessor{
+		task: task, reqCtx: reqCtx, meta: meta,
+		terminalEvents: make(map[a2a.TaskState]*a2a.TaskStatusUpdateEvent),
+	}
+}
+
 func (p *eventProcessor) process(ctx context.Context, event *session.Event) (*a2a.TaskArtifactUpdateEvent, error) {
 	if event == nil {
 		return nil, nil
@@ -72,7 +79,9 @@ func (p *eventProcessor) process(ctx context.Context, event *session.Event) (*a2
 	} else {
 		result = a2a.NewArtifactUpdateEvent(p.task, p.responseID, parts...)
 	}
-	result.Metadata = eventMeta
+	if len(eventMeta) > 0 {
+		result.Metadata = eventMeta
+	}
 
 	return result, nil
 }
@@ -100,17 +109,17 @@ func (p *eventProcessor) makeTerminalEvents() []a2a.Event {
 	return result
 }
 
-func (p *eventProcessor) makeTaskFailedEvent(err error, event *session.Event) *a2a.TaskStatusUpdateEvent {
+func (p *eventProcessor) makeTaskFailedEvent(cause error, event *session.Event) *a2a.TaskStatusUpdateEvent {
 	meta, err := toEventMeta(p.meta, event)
 	if err != nil {
 		// TODO(yarolegovich): log ignored error
 		meta = p.meta.eventMeta
 	}
-	return toTaskFailedUpdateEvent(p.task, err, meta)
+	return toTaskFailedUpdateEvent(p.task, cause, meta)
 }
 
-func toTaskFailedUpdateEvent(task *a2a.Task, err error, meta map[string]any) *a2a.TaskStatusUpdateEvent {
-	msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, task, a2a.TextPart{Text: err.Error()})
+func toTaskFailedUpdateEvent(task *a2a.Task, cause error, meta map[string]any) *a2a.TaskStatusUpdateEvent {
+	msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, task, a2a.TextPart{Text: cause.Error()})
 	ev := a2a.NewStatusUpdateEvent(task, a2a.TaskStateFailed, msg)
 	ev.Metadata = meta
 	ev.Final = true

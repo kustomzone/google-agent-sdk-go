@@ -36,11 +36,14 @@ func toEventMeta(meta invocationMeta, event *session.Event) (map[string]any, err
 		result[k] = v
 	}
 
-	result[toMetaKey("invocation_id")] = event.InvocationID
-	result[toMetaKey("author")] = event.Author
-
-	if event.Branch != "" {
-		result[toMetaKey("branch")] = event.Branch
+	for k, v := range map[string]string{
+		"invocation_id": event.InvocationID,
+		"author":        event.Author,
+		"branch":        event.Branch,
+	} {
+		if v != "" {
+			result[toMetaKey(k)] = v
+		}
 	}
 
 	response := event.LLMResponse
