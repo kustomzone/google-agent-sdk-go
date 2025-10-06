@@ -119,8 +119,8 @@ func TestExecutor_Execute(t *testing.T) {
 			name:    "success for a new task",
 			request: &a2a.MessageSendParams{Message: a2a.NewMessage(a2a.MessageRoleUser, a2a.TextPart{Text: "hi"})},
 			events: []*session.Event{
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: "Hello"})},
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: ", world!"})},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("Hello"))},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText(", world!"))},
 			},
 			wantEvents: []a2a.Event{
 				a2a.NewStatusUpdateEvent(task, a2a.TaskStateSubmitted, nil),
@@ -135,8 +135,8 @@ func TestExecutor_Execute(t *testing.T) {
 			name:    "success for existing task",
 			request: &a2a.MessageSendParams{Message: hiMsgForTask},
 			events: []*session.Event{
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: "Hello"})},
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: ", world!"})},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("Hello"))},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText(", world!"))},
 			},
 			wantEvents: []a2a.Event{
 				a2a.NewStatusUpdateEvent(task, a2a.TaskStateWorking, nil),
@@ -156,9 +156,9 @@ func TestExecutor_Execute(t *testing.T) {
 			name:    "llm fails",
 			request: &a2a.MessageSendParams{Message: hiMsgForTask},
 			events: []*session.Event{
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: "Hello"})},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("Hello"))},
 				{LLMResponse: &llm.Response{ErrorCode: 418, ErrorMessage: "I'm a teapot"}},
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: ", world!"})},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText(", world!"))},
 			},
 			wantEvents: []a2a.Event{
 				a2a.NewStatusUpdateEvent(task, a2a.TaskStateWorking, nil),
@@ -175,7 +175,7 @@ func TestExecutor_Execute(t *testing.T) {
 			name:    "agent run fails",
 			request: &a2a.MessageSendParams{Message: hiMsgForTask},
 			events: []*session.Event{
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: "Hello"})},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("Hello"))},
 			},
 			agentRunFails: fmt.Errorf("OOF"),
 			wantEvents: []a2a.Event{
@@ -191,7 +191,7 @@ func TestExecutor_Execute(t *testing.T) {
 			name:    "agent run and queue write fail",
 			request: &a2a.MessageSendParams{Message: hiMsgForTask},
 			events: []*session.Event{
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: "Hello"})},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("Hello"))},
 			},
 			queueWriteFails: &eventIndex{2},
 			agentRunFails:   fmt.Errorf("OOF"),

@@ -71,7 +71,7 @@ func TestEventProcessor_Process(t *testing.T) {
 		{
 			name: "multi-part artifact update",
 			events: []*session.Event{{
-				LLMResponse: modelResponseFromParts(&genai.Part{Text: "Hello"}, &genai.Part{Text: ", world!"}),
+				LLMResponse: modelResponseFromParts(genai.NewPartFromText("Hello"), genai.NewPartFromText(", world!")),
 			}},
 			processed: []*a2a.TaskArtifactUpdateEvent{
 				a2a.NewArtifactEvent(task, a2a.TextPart{Text: "Hello"}, a2a.TextPart{Text: ", world!"}),
@@ -85,17 +85,13 @@ func TestEventProcessor_Process(t *testing.T) {
 			name: "multiple artifact updates",
 			events: []*session.Event{
 				{
-					LLMResponse: modelResponseFromParts(&genai.Part{
-						ExecutableCode: &genai.ExecutableCode{Code: "get_the_answer()", Language: genai.LanguagePython},
-					}),
+					LLMResponse: modelResponseFromParts(genai.NewPartFromExecutableCode("get_the_answer()", genai.LanguagePython)),
 				},
 				{
-					LLMResponse: modelResponseFromParts(&genai.Part{
-						CodeExecutionResult: &genai.CodeExecutionResult{Outcome: genai.OutcomeOK, Output: "42"},
-					}),
+					LLMResponse: modelResponseFromParts(genai.NewPartFromCodeExecutionResult(genai.OutcomeOK, "42")),
 				},
 				{
-					LLMResponse: modelResponseFromParts(&genai.Part{Text: "The answer is 42"}),
+					LLMResponse: modelResponseFromParts(genai.NewPartFromText("The answer is 42")),
 				},
 			},
 			processed: []*a2a.TaskArtifactUpdateEvent{
@@ -142,8 +138,8 @@ func TestEventProcessor_Process(t *testing.T) {
 		{
 			name: "failed with artifacts",
 			events: []*session.Event{
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: "The answer is"})},
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: "42"})},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("The answer is"))},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("42"))},
 				{LLMResponse: &llm.Response{ErrorCode: 1, ErrorMessage: "failed"}},
 			},
 			processed: []*a2a.TaskArtifactUpdateEvent{
@@ -161,9 +157,9 @@ func TestEventProcessor_Process(t *testing.T) {
 		{
 			name: "failed before receiving all parts",
 			events: []*session.Event{
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: "The answer is"})},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("The answer is"))},
 				{LLMResponse: &llm.Response{ErrorCode: 1, ErrorMessage: "failed"}},
-				{LLMResponse: modelResponseFromParts(&genai.Part{Text: "42"})},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromText("42"))},
 			},
 			processed: []*a2a.TaskArtifactUpdateEvent{
 				a2a.NewArtifactEvent(task, a2a.TextPart{Text: "The answer is"}),
@@ -180,13 +176,11 @@ func TestEventProcessor_Process(t *testing.T) {
 		{
 			name: "input_required not produced for a normal function call",
 			events: []*session.Event{
-				{LLMResponse: modelResponseFromParts(&genai.Part{
-					FunctionCall: &genai.FunctionCall{ID: "get_weather", Args: map[string]any{"city": "Warsaw"}},
-				})},
+				{LLMResponse: modelResponseFromParts(genai.NewPartFromFunctionCall("get_weather", map[string]any{"city": "Warsaw"}))},
 			},
 			processed: []*a2a.TaskArtifactUpdateEvent{
 				a2a.NewArtifactEvent(task, a2a.DataPart{
-					Data: map[string]any{"id": "get_weather", "args": map[string]any{"city": "Warsaw"}},
+					Data: map[string]any{"name": "get_weather", "args": map[string]any{"city": "Warsaw"}},
 					Metadata: map[string]any{
 						a2aDataPartMetaTypeKey:        a2aDataPartTypeFunctionCall,
 						a2aDataPartMetaLongRunningKey: false,
@@ -204,13 +198,13 @@ func TestEventProcessor_Process(t *testing.T) {
 				{
 					LongRunningToolIDs: []string{"get_weather"},
 					LLMResponse: modelResponseFromParts(&genai.Part{
-						FunctionCall: &genai.FunctionCall{ID: "get_weather", Args: map[string]any{"city": "Warsaw"}},
+						FunctionCall: &genai.FunctionCall{ID: "get_weather", Name: "weather", Args: map[string]any{"city": "Warsaw"}},
 					}),
 				},
 			},
 			processed: []*a2a.TaskArtifactUpdateEvent{
 				a2a.NewArtifactEvent(task, a2a.DataPart{
-					Data: map[string]any{"id": "get_weather", "args": map[string]any{"city": "Warsaw"}},
+					Data: map[string]any{"id": "get_weather", "name": "weather", "args": map[string]any{"city": "Warsaw"}},
 					Metadata: map[string]any{
 						a2aDataPartMetaTypeKey:        a2aDataPartTypeFunctionCall,
 						a2aDataPartMetaLongRunningKey: true,
@@ -228,16 +222,16 @@ func TestEventProcessor_Process(t *testing.T) {
 				{
 					LongRunningToolIDs: []string{"get_weather"},
 					LLMResponse: modelResponseFromParts(&genai.Part{
-						FunctionCall: &genai.FunctionCall{ID: "get_weather", Args: map[string]any{"city": "Warsaw"}},
+						FunctionCall: &genai.FunctionCall{ID: "get_weather", Name: "weather", Args: map[string]any{"city": "Warsaw"}},
 					}),
 				},
 				{
-					LLMResponse: modelResponseFromParts(&genai.Part{Text: "This will take a while"}),
+					LLMResponse: modelResponseFromParts(genai.NewPartFromText("This will take a while")),
 				},
 			},
 			processed: []*a2a.TaskArtifactUpdateEvent{
 				a2a.NewArtifactEvent(task, a2a.DataPart{
-					Data: map[string]any{"id": "get_weather", "args": map[string]any{"city": "Warsaw"}},
+					Data: map[string]any{"id": "get_weather", "name": "weather", "args": map[string]any{"city": "Warsaw"}},
 					Metadata: map[string]any{
 						a2aDataPartMetaTypeKey:        a2aDataPartTypeFunctionCall,
 						a2aDataPartMetaLongRunningKey: true,
@@ -302,28 +296,20 @@ func TestEventProcessor_ArtifactUpdates(t *testing.T) {
 	task := &a2a.Task{ID: a2a.NewTaskID(), ContextID: a2a.NewContextID()}
 	events := []*session.Event{
 		{
-			LLMResponse: modelResponseFromParts(&genai.Part{
-				ExecutableCode: &genai.ExecutableCode{Code: "find_cat()", Language: genai.LanguagePython},
-			}),
+			LLMResponse: modelResponseFromParts(genai.NewPartFromExecutableCode("find_cat()", genai.LanguagePython)),
 		},
 		{
 			LLMResponse: modelResponseFromParts(
-				&genai.Part{
-					CodeExecutionResult: &genai.CodeExecutionResult{Outcome: genai.OutcomeOK, Output: "https://cats.com/image.png"},
-				},
-				&genai.Part{Text: "A cat image was downloaded to /home/me/cat.png"},
-				&genai.Part{
-					FunctionCall: &genai.FunctionCall{ID: "download", Args: map[string]any{"from": "https://cats.com/image.png", "to": "/home/me/cat.png"}},
-				},
+				genai.NewPartFromCodeExecutionResult(genai.OutcomeOK, "https://cats.com/image.png"),
+				genai.NewPartFromText("A cat image was downloaded to /home/me/cat.png"),
+				genai.NewPartFromFunctionCall("download", map[string]any{"from": "https://cats.com/image.png", "to": "/home/me/cat.png"}),
 			),
 		},
 		{
-			LLMResponse: modelResponseFromParts(&genai.Part{
-				FunctionResponse: &genai.FunctionResponse{ID: "download", Response: map[string]any{"status": "ok"}},
-			}),
+			LLMResponse: modelResponseFromParts(genai.NewPartFromFunctionResponse("download", map[string]any{"status": "ok"})),
 		},
 		{
-			LLMResponse: modelResponseFromParts(&genai.Part{Text: "A cat image was downloaded to /home/me/cat.png"}),
+			LLMResponse: modelResponseFromParts(genai.NewPartFromText("A cat image was downloaded to /home/me/cat.png")),
 		},
 	}
 
