@@ -18,8 +18,11 @@ import (
 	"encoding/json"
 
 	"github.com/a2aproject/a2a-go/a2asrv"
+	"google.golang.org/adk/runner"
 	"google.golang.org/adk/session"
 )
+
+type ExecutorConfig runner.Config
 
 type invocationMeta struct {
 	userID    string
@@ -65,7 +68,7 @@ func toEventMeta(meta invocationMeta, event *session.Event) (map[string]any, err
 		return result, nil
 	}
 
-	if response.ErrorCode != 0 {
+	if response.ErrorCode != "" {
 		result[toMetaKey("error_code")] = response.ErrorCode
 	}
 
