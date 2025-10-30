@@ -86,7 +86,7 @@ func newTestClientFactory(listener *bufconn.Listener) *a2aclient.Factory {
 
 func newRemoteAgent(t *testing.T, name string, listener *bufconn.Listener) agent.Agent {
 	t.Helper()
-	card := &a2a.AgentCard{PreferredTransport: a2a.TransportProtocolGRPC, URL: "passthrough:///bufnet"}
+	card := &a2a.AgentCard{PreferredTransport: a2a.TransportProtocolGRPC, URL: "passthrough:///bufnet", Capabilities: a2a.AgentCapabilities{Streaming: true}}
 	clientFactory := newTestClientFactory(listener)
 	agent, err := New(A2AConfig{Name: name, AgentCard: card, ClientFactory: clientFactory})
 	if err != nil {
@@ -448,7 +448,7 @@ func TestRemoteAgent_ADK2A2A(t *testing.T) {
 			}
 			gotResponses := toLLMResponses(gotEvents)
 			if diff := cmp.Diff(tc.wantResponses, gotResponses, ignoreFields...); diff != "" {
-				t.Errorf("agent.Run() wrong result (+got,-want):\ngot = %+v\nwant = %+v\ndiff = %s", gotResponses, tc.wantResponses, diff)
+				t.Errorf("agent.Run() wrong result (+got,-want):\ngot = %+v\nwant = %+v\ndiff = %s", pretty(gotResponses), pretty(tc.wantResponses), diff)
 			}
 			for _, event := range gotEvents {
 				if _, ok := event.CustomMetadata[adka2a.ToADKMetaKey("response")]; !ok {
@@ -460,6 +460,14 @@ func TestRemoteAgent_ADK2A2A(t *testing.T) {
 			}
 		})
 	}
+}
+
+func pretty(v any) string {
+	str, err := json.MarshalIndent(v, "", " ")
+	if err != nil {
+		panic(err.Error())
+	}
+	return string(str)
 }
 
 func TestRemoteAgent_EmptyResultForEmptySession(t *testing.T) {
@@ -501,7 +509,7 @@ func TestRemoteAgent_ResolvesAgentCard(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/agent-card.json", func(w http.ResponseWriter, r *http.Request) {
-		card := &a2a.AgentCard{PreferredTransport: a2a.TransportProtocolGRPC, URL: "passthrough:///bufnet"}
+		card := &a2a.AgentCard{PreferredTransport: a2a.TransportProtocolGRPC, URL: "passthrough:///bufnet", Capabilities: a2a.AgentCapabilities{Streaming: true}}
 		if err := json.NewEncoder(w).Encode(card); err != nil {
 			t.Errorf("json.Encode(agentCard) error = %v", err)
 		}
