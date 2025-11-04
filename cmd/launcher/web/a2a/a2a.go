@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// package a2a allows to run A2A
+// Package a2a allows to run A2A
 package a2a
 
 import (
@@ -42,7 +42,7 @@ type a2aLauncher struct {
 }
 
 // NewLauncher creates new a2a launcher. It extends Web launcher
-func NewLauncher() web.WebSublauncher {
+func NewLauncher() web.Sublauncher {
 	config := &a2aConfig{}
 
 	fs := flag.NewFlagSet("a2a", flag.ContinueOnError)

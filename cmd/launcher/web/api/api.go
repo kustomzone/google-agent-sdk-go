@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// package api allows to run ADK REST API alone
+// Package api allows to run ADK REST API within the web server (using url /api/)
 package api
 
 import (
@@ -60,16 +60,16 @@ func corsWithArgs(frontendAddress string) func(next http.Handler) http.Handler {
 }
 
 // UserMessage implements web.WebSublauncher. Prints message to the user
-func (a *apiLauncher) UserMessage(webUrl string, printer func(v ...any)) {
-	printer(fmt.Sprintf("       api:  you can access API using %s/api", webUrl))
-	printer(fmt.Sprintf("       api:      for instance: %s/api/list-apps", webUrl))
+func (a *apiLauncher) UserMessage(webURL string, printer func(v ...any)) {
+	printer(fmt.Sprintf("       api:  you can access API using %s/api", webURL))
+	printer(fmt.Sprintf("       api:      for instance: %s/api/list-apps", webURL))
 }
 
 // SetupSubrouters adds the API router to the parent router.
 func (a *apiLauncher) SetupSubrouters(router *mux.Router, adkConfig *adk.Config) error {
-	rApi := router.Methods("GET", "POST", "DELETE", "OPTIONS").PathPrefix("/api/").Subrouter()
-	restapiweb.SetupRouter(rApi, adkConfig)
-	rApi.Use(corsWithArgs(a.config.frontendAddress))
+	rAPI := router.Methods("GET", "POST", "DELETE", "OPTIONS").PathPrefix("/api/").Subrouter()
+	restapiweb.SetupRouter(rAPI, adkConfig)
+	rAPI.Use(corsWithArgs(a.config.frontendAddress))
 	return nil
 }
 
@@ -94,7 +94,7 @@ func (a *apiLauncher) SimpleDescription() string {
 }
 
 // NewLauncher creates new api launcher. It extends Web launcher
-func NewLauncher() weblauncher.WebSublauncher {
+func NewLauncher() weblauncher.Sublauncher {
 	config := &apiConfig{}
 
 	fs := flag.NewFlagSet("web", flag.ContinueOnError)

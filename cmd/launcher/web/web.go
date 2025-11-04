@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// package web provides a way to run ADK using web server (extended by sublaunchers)
+// Package web provides a way to run ADK using web server (extended by sublaunchers)
 package web
 
 import (
@@ -40,9 +40,9 @@ type webConfig struct {
 type Launcher struct {
 	flags        *flag.FlagSet
 	config       *webConfig
-	sublaunchers []WebSublauncher
+	sublaunchers []Sublauncher
 	// maps keyword to sublauncher for the keywords parsed from command line
-	activeSublaunchers map[string]WebSublauncher
+	activeSublaunchers map[string]Sublauncher
 }
 
 // Execute implements launcher.Launcher.
@@ -59,18 +59,22 @@ func (w *Launcher) Execute(ctx context.Context, config *adk.Config, args []strin
 	return w.Run(ctx, config)
 }
 
-// WebSublauncher defines an interface for extending the WebLauncher.
+// Sublauncher defines an interface for extending the WebLauncher.
 // Each sublauncher can add its own routes, wrap existing handlers, and parse its own command-line flags.
-type WebSublauncher interface {
+type Sublauncher interface {
+	// Keyword is used to request usage of the WebSublauncher from command-line
 	Keyword() string
+	// Parse after parsing command line args returnes the remaining un-parsed arguments or error
 	Parse(args []string) ([]string, error)
+	// CommandLineSyntax returns a formatted string explaing command line syntax to end user
 	CommandLineSyntax() string
+	// SimpleDescription returns a short explanatory test displayed to end user
 	SimpleDescription() string
 
 	// SetupSubrouters adds sublauncher-specific routes to the router.
 	SetupSubrouters(router *mux.Router, adkConfig *adk.Config) error
 	// UserMessage is a hook for sublaunchers to print a message to the user when the web server starts.
-	UserMessage(webUrl string, printer func(v ...any))
+	UserMessage(webURL string, printer func(v ...any))
 }
 
 // CommandLineSyntax implements launcher.Launcher.
@@ -98,7 +102,7 @@ func (w *Launcher) Keyword() string {
 // for any specified sublaunchers. It returns any arguments that are not processed.
 func (w *Launcher) Parse(args []string) ([]string, error) {
 
-	keyToSublauncher := make(map[string]WebSublauncher)
+	keyToSublauncher := make(map[string]Sublauncher)
 	for _, l := range w.sublaunchers {
 		if _, ok := keyToSublauncher[l.Keyword()]; ok {
 			return nil, fmt.Errorf("cannot create universal launcher. Keywords for sublaunchers should be unique and they are not: '%s'", l.Keyword())
@@ -112,7 +116,7 @@ func (w *Launcher) Parse(args []string) ([]string, error) {
 	}
 
 	restArgs := w.flags.Args()
-	w.activeSublaunchers = make(map[string]WebSublauncher)
+	w.activeSublaunchers = make(map[string]Sublauncher)
 
 	for len(restArgs) > 0 {
 		keyword := restArgs[0]
@@ -192,7 +196,7 @@ func (w *Launcher) SimpleDescription() string {
 
 // NewLauncher creates a new WebLauncher. It should be extended by providing
 // one or more WebSublaunchers that add the actual content and functionality.
-func NewLauncher(sublaunchers ...WebSublauncher) *Launcher {
+func NewLauncher(sublaunchers ...Sublauncher) *Launcher {
 
 	config := &webConfig{}
 
