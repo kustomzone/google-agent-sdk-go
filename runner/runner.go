@@ -132,6 +132,7 @@ func (r *Runner) Run(ctx context.Context, userID, sessionID string, msg *genai.C
 			Session:     sessioninternal.NewMutableSession(r.sessionService, session),
 			Agent:       agentToRun,
 			UserContent: msg,
+			RunConfig:   &cfg,
 		})
 
 		if err := r.appendMessageToSession(ctx, session, msg, cfg.SaveInputBlobsAsArtifacts); err != nil {

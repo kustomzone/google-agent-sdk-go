@@ -109,6 +109,7 @@ func (a *a2aAgent) run(ctx agent.InvocationContext, cfg A2AConfig) iter.Seq2[*se
 				yield(event, nil)
 				return
 			}
+
 			event, err := adka2a.ToSessionEvent(ctx, a2aEvent)
 			if err != nil {
 				event := toErrorEvent(ctx, fmt.Errorf("failed to convert a2aEvent: %w", err))
@@ -116,9 +117,11 @@ func (a *a2aAgent) run(ctx agent.InvocationContext, cfg A2AConfig) iter.Seq2[*se
 				yield(event, nil)
 				return
 			}
+
 			if event == nil {
 				continue
 			}
+
 			updateCustomMetadata(event, req, a2aEvent)
 			if !yield(event, nil) {
 				break
