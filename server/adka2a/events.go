@@ -76,6 +76,7 @@ func ToSessionEvent(ctx agent.InvocationContext, event a2a.Event) (*session.Even
 		}
 		event.LongRunningToolIDs = getLongRunningToolIDs(v.Artifact.Parts, event.Content.Parts)
 		event.CustomMetadata = ToCustomMetadata(v.TaskID, v.ContextID)
+		event.Partial = true
 		return event, nil
 
 	case *a2a.TaskStatusUpdateEvent:
